@@ -1,19 +1,17 @@
 cmake_minimum_required(VERSION 3.24)
 
 project(
-	IsInCombatConsoleFix
-	VERSION 1.0.0
+	IsInCombatConsoleCrashFix
+	VERSION 1.1.0
 	LANGUAGES CXX
 )
 
-# ponytail: CommonLib + CMake modules borrowed from the PathIdleCrashFix checkout; submodules if this gets published
-set(SHARED "${PROJECT_SOURCE_DIR}/../PathIdleCrashFix")
 list(APPEND CMAKE_IGNORE_PATH "${PROJECT_BINARY_DIR}")
-list(APPEND CMAKE_MODULE_PATH "${SHARED}/Tools/SKSE-CMakeModules/Modules")
+list(APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/Tools/SKSE-CMakeModules/Modules")
 include(SKSEPlugin)
 
 set(SKSE_USE_XBYAK OFF)
-set(SKSE_COMMONLIBSSE_PATH "${SHARED}/External/CommonLibSSE-NG")
+set(SKSE_COMMONLIBSSE_PATH "External/CommonLibSSE-NG")
 set(BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(ENABLE_SKYRIM_SE ON CACHE BOOL "" FORCE)
 set(ENABLE_SKYRIM_AE ON CACHE BOOL "" FORCE)

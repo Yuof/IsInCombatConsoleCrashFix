@@ -1,7 +1,7 @@
 {
-  "name": "isincombatconsolefix",
-  "version-string": "1.0.0",
-  "description": "SKSE plugin: fixes the crash when IsInCombat prints its console result for a subject that is not an actor.",
+  "name": "isincombatconsolecrashfix",
+  "version-string": "1.1.0",
+  "description": "SKSE plugin: fixes the crash when IsInCombat answers in the console for a reference that is not an actor.",
   "license": "GPL-3.0-or-later",
   "dependencies": [
     "directxmath",

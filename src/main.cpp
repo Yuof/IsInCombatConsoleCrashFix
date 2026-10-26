@@ -1,41 +1,55 @@
-// Fixes the crash at SkyrimSE+0CC90CF on 1.6.1170 (BSReadWriteLock::LockForRead on null + 0x88 under
-// TESObjectREFR::GetDisplayFullName). While a console command runs, condition functions print their result to the
-// console; IsInCombat's prints "%s is not in combat" with the subject's name but, unlike its other branch, without
-// checking that the subject is an actor - a non-actor subject arrives as null. That happens for a non-actor ref
-// selected in the console, and for quest alias candidates when a console coc / cow starts a quest (a quest that tests
-// IsInCombat on refs in the loaded area). Every call from that function to GetDisplayFullName gets a null check.
-// Addresses come from Address Library; the calls are found by their target at load, a build without them stays inactive.
+// Fixes a vanilla crash while a console command runs (SkyrimSE.exe+0CC90CF on 1.6.1170: BSReadWriteLock::LockForRead
+// on null + 0x88 under TESObjectREFR::GetDisplayFullName). In console mode condition functions print their result, and
+// IsInCombat prints "%s is not in combat" with its subject's name without checking that the subject is an actor - a
+// reference that is not one arrives as null. That happens with IsInCombat typed in the console on a non-actor, and when
+// a console command (coc, cow, a mod's ConsoleUtil call) runs quest conditions that test IsInCombat on non-actors.
+// The plugin wraps IsInCombat's console handler and condition function in the script command table: in console mode a
+// reference that is not an actor gets 0 (the game's own answer), the console handler prints its name; everything else
+// goes to the game's functions unchanged. The command is found by its name, so no code offsets are involved.
 
 namespace
 {
-	constexpr std::uint64_t kIsInCombat = 21576, kGetDisplayFullName = 19781;  // AE ids
-	constexpr std::size_t   kSpan = 0xD0;                                     // the function's size on 1.6.1170 and 1.7.104
+	RE::SCRIPT_FUNCTION::Execute_t*   Execute = nullptr;
+	RE::SCRIPT_FUNCTION::Condition_t* Condition = nullptr;
+	std::atomic<std::uint64_t>        catches{ 0 };
 
-	struct GetDisplayFullName
+	bool Milestone(std::uint64_t a_n)  // 1, 10, 100, ...
 	{
-		static const char* thunk(RE::TESObjectREFR* a_ref)
-		{
-			if (!a_ref) {
-				logger::info("IsInCombat printed for a subject that is not an actor: empty name"sv);
-				return "";
-			}
-			return func(a_ref);
+		while (a_n % 10 == 0) {
+			a_n /= 10;
 		}
-		static inline REL::Relocation<decltype(thunk)> func;
-	};
+		return a_n == 1;
+	}
 
-	std::vector<std::uintptr_t> CallSites()
+	// the case the game's code crashes on: console mode and a subject that is not an actor
+	bool Caught(RE::TESObjectREFR* a_ref, double& a_result)
 	{
-		std::vector<std::uintptr_t> sites;
-		const auto begin = REL::ID(kIsInCombat).address();
-		const auto target = REL::ID(kGetDisplayFullName).address();
-		for (auto at = begin; at + 5 <= begin + kSpan; ++at) {
-			const auto rel = *reinterpret_cast<const std::int32_t*>(at + 1);
-			if (*reinterpret_cast<const std::uint8_t*>(at) == 0xE8 && at + 5 + static_cast<std::intptr_t>(rel) == target) {
-				sites.push_back(at);
-			}
+		if (!RE::ConsoleLog::IsConsoleMode() || (a_ref && a_ref->GetFormType() == RE::FormType::ActorCharacter)) {
+			return false;
 		}
-		return sites;
+		a_result = 0.0;
+		// ponytail: a log line at the 1st, 10th, 100th ... catch - one console coc can run a quest fill over thousands of references
+		if (const auto n = ++catches; Milestone(n)) {
+			logger::info("IsInCombat in console mode on {:08X} \"{}\", not an actor: answered 0 ({} so far)"sv,
+				a_ref ? a_ref->GetFormID() : 0, a_ref ? a_ref->GetDisplayFullName() : "", n);
+		}
+		return true;
+	}
+
+	bool ExecuteThunk(const RE::SCRIPT_PARAMETER* a_paramInfo, RE::SCRIPT_FUNCTION::ScriptData* a_scriptData,
+		RE::TESObjectREFR* a_thisObj, RE::TESObjectREFR* a_containingObj, RE::Script* a_scriptObj, RE::ScriptLocals* a_locals,
+		double& a_result, std::uint32_t& a_opcodeOffsetPtr)
+	{
+		if (Caught(a_thisObj, a_result)) {
+			RE::ConsoleLog::GetSingleton()->Print("%s is not in combat", a_thisObj ? a_thisObj->GetDisplayFullName() : "");
+			return true;
+		}
+		return Execute(a_paramInfo, a_scriptData, a_thisObj, a_containingObj, a_scriptObj, a_locals, a_result, a_opcodeOffsetPtr);
+	}
+
+	bool ConditionThunk(RE::TESObjectREFR* a_thisObj, void* a_param1, void* a_param2, double& a_result)
+	{
+		return Caught(a_thisObj, a_result) || Condition(a_thisObj, a_param1, a_param2, a_result);
 	}
 }
 
@@ -49,20 +63,15 @@ SKSE_PLUGIN_LOAD(const SKSE::LoadInterface* a_skse)
 {
 	SKSE::Init(a_skse, { .log = true });
 	logger::info("{} v{} on {}"sv, Plugin::NAME, Plugin::VERSION.string(), REL::Module::get().version().string());
-	// the ids above are AE ids: SE / VR number theirs differently, and a missing id stops the game in CommonLib's lookup
-	if (!REL::Module::IsAE()) {
-		logger::error("not an AE runtime: inactive"sv);
+	auto* command = RE::SCRIPT_FUNCTION::LocateScriptCommand("IsInCombat"sv);
+	if (!command || !command->executeFunction || !command->conditionFunction || !command->referenceFunction || command->numParams != 1) {
+		logger::error("self-check failed (IsInCombat not found as expected in the script command table): inactive"sv);
 		return true;
 	}
-	const auto sites = CallSites();
-	if (sites.empty()) {
-		logger::error("self-check failed (no GetDisplayFullName call in IsInCombat's condition function): inactive"sv);
-		return true;
-	}
-	SKSE::AllocTrampoline(14 * sites.size());
-	for (const auto site : sites) {
-		GetDisplayFullName::func = SKSE::GetTrampoline().write_call<5>(site, GetDisplayFullName::thunk);
-	}
-	logger::info("self-check passed, guarded {} GetDisplayFullName call(s) in IsInCombat"sv, sites.size());
+	Execute = command->executeFunction;
+	Condition = command->conditionFunction;
+	command->executeFunction = ExecuteThunk;
+	command->conditionFunction = ConditionThunk;
+	logger::info("self-check passed, wrapped IsInCombat's console handler and condition function"sv);
 	return true;
 }
