@@ -20,7 +20,7 @@ expected, the plugin stays inactive and says so in `IsInCombatConsoleCrashFix.lo
 - [Address Library for SKSE Plugins](https://www.nexusmods.com/skyrimspecialedition/mods/32444)
 
 ## Building
-Visual Studio 2022 (C++), CMake 3.24+, [vcpkg](https://github.com/microsoft/vcpkg) with `VCPKG_ROOT` set.
+Visual Studio 2022 or newer (C++; the preset uses the newest one installed), CMake 3.24+, [vcpkg](https://github.com/microsoft/vcpkg) with `VCPKG_ROOT` set.
 
 ```
 git clone --recurse-submodules https://github.com/Yuof/IsInCombatConsoleCrashFix
